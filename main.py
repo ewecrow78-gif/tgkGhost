@@ -3,61 +3,63 @@ import os
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 
-from parser import extract_all, normalize_config
-from config import CHANNELS, OUTPUT_FILE, UPDATE_INTERVAL, normalize_channel
-
-
 API_ID = int(os.getenv("TG_API_ID"))
 API_HASH = os.getenv("TG_API_HASH")
 SESSION_STR = os.getenv("TG_SESSION")
 
+CHANNELS_FILE = "tg_channels.txt"
+OUTPUT_FILE = "configs.txt"
+UPDATE_INTERVAL = 1800  # 30 минут
+
+
+def load_channels():
+    channels = []
+    with open(CHANNELS_FILE, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#"):
+                channels.append(line)
+    return channels
+
 
 async def scrape_once(client):
-    all_configs = []
-    norm_channels = [normalize_channel(c) for c in CHANNELS]
+    channels = load_channels()
+    all_cfg = []
 
-    for channel in norm_channels:
-        print(f"[+] Читаю канал: {channel}")
+    for ch in channels:
+        async for msg in client.iter_messages(ch, limit=500):
+            if msg.message:
+                for line in msg.message.split("\n"):
+                    line = line.strip()
+                    if line.startswith(("vmess://", "vless://", "trojan://", "ss://")):
+                        all_cfg.append(line)
 
-        async for msg in client.iter_messages(channel, limit=500):
-            if not msg.message:
-                continue
-
-            configs = extract_all(msg.message)
-            all_configs.extend(configs)
-
-    # нормализация + удаление дублей
-    normalized = {normalize_config(cfg): cfg for cfg in all_configs}
-    final_list = list(normalized.keys())
+    # удаляем дубли
+    all_cfg = list(dict.fromkeys(all_cfg))
 
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-        for cfg in final_list:
+        for cfg in all_cfg:
             f.write(cfg + "\n")
 
-    print(f"[✓] Готово! Уникальных конфигов: {len(final_list)}")
-    print(f"Сохранено в {OUTPUT_FILE}")
-    print("-" * 40)
+    print(f"Сохранено {len(all_cfg)} конфигов")
 
 
-async def run():
+async def main():
     if not SESSION_STR:
-        print("❌ TG_SESSION отсутствует в Secrets")
+        print("❌ TG_SESSION отсутствует")
         return
 
     client = TelegramClient(StringSession(SESSION_STR), API_ID, API_HASH)
     await client.connect()
 
     if not await client.is_user_authorized():
-        print("❌ TG_SESSION недействителен — обнови секрет")
+        print("❌ Сессия недействительна")
         return
 
     while True:
-        print("[⏳] Запуск обновления...")
         await scrape_once(client)
-
-        print(f"[⏲] Следующее обновление через {UPDATE_INTERVAL // 60} минут.")
         await asyncio.sleep(UPDATE_INTERVAL)
 
 
 if __name__ == "__main__":
-    asyncio.run(run())
+    asyncio.run(main())
