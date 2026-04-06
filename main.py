@@ -1,5 +1,7 @@
 import asyncio
 import os
+import re
+import aiohttp
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 
@@ -9,6 +11,16 @@ SESSION_STR = os.getenv("TG_SESSION")
 
 CHANNELS_FILE = "tg_channels.txt"
 OUTPUT_FILE = "configs.txt"
+
+# Регулярка для поиска RAW GitHub ссылок
+RAW_GITHUB_REGEX = re.compile(
+    r"https://raw\.githubusercontent\.com/[^\s]+\.txt"
+)
+
+# Регулярка для поиска конфигов
+CONFIG_REGEX = re.compile(
+    r"(vmess://[^\s]+|vless://[^\s]+|trojan://[^\s]+|ss://[^\s]+)"
+)
 
 
 def load_channels():
@@ -21,36 +33,60 @@ def load_channels():
     return channels
 
 
-async def safe_iter_messages(client, channel, limit):
+async def download_raw(url: str) -> str:
+    """Скачивает RAW-файл с GitHub"""
     try:
-        async with asyncio.timeout(15):  # максимум 15 секунд на канал
-            async for msg in client.iter_messages(channel, limit=limit):
-                yield msg
-    except asyncio.TimeoutError:
-        print(f"⚠ Таймаут при чтении канала: {channel}")
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=15) as resp:
+                if resp.status == 200:
+                    return await resp.text()
+                else:
+                    print(f"⚠ Ошибка загрузки RAW {url}: {resp.status}")
+    except Exception as e:
+        print(f"⚠ Ошибка RAW {url}: {e}")
+    return ""
+
+
+def extract_configs(text: str):
+    """Извлекает все конфиги из текста"""
+    return CONFIG_REGEX.findall(text)
 
 
 async def scrape_once(client):
     channels = load_channels()
-    all_cfg = []
+    all_configs = []
 
     for ch in channels:
-        print(f"Читаю канал: {ch}")
-        async for msg in safe_iter_messages(client, ch, limit=600):
-            if msg.message:
-                for line in msg.message.split("\n"):
-                    line = line.strip()
-                    if line.startswith(("vmess://", "vless://", "trojan://", "ss://")):
-                        all_cfg.append(line)
+        print(f"📡 Читаю канал: {ch}")
 
-    # удаляем дубли
-    all_cfg = list(dict.fromkeys(all_cfg))
+        async for msg in client.iter_messages(ch, limit=500):
+            if not msg.message:
+                continue
+
+            text = msg.message
+
+            # 1. Ищем RAW GitHub ссылки
+            raw_links = RAW_GITHUB_REGEX.findall(text)
+
+            # 2. Скачиваем и парсим каждый RAW
+            for link in raw_links:
+                print(f"   → RAW найден: {link}")
+                raw_text = await download_raw(link)
+
+                cfgs = extract_configs(raw_text)
+                all_configs.extend(cfgs)
+
+            # 3. Также проверяем сам текст сообщения
+            all_configs.extend(extract_configs(text))
+
+    # Удаляем дубли
+    all_configs = list(dict.fromkeys(all_configs))
 
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-        for cfg in all_cfg:
+        for cfg in all_configs:
             f.write(cfg + "\n")
 
-    print(f"Сохранено {len(all_cfg)} конфигов")
+    print(f"💾 Сохранено {len(all_configs)} конфигов")
 
 
 async def main():
@@ -65,7 +101,7 @@ async def main():
         print("❌ Сессия недействительна")
         return
 
-    await scrape_once(client)  # ← один запуск и выход
+    await scrape_once(client)
 
 
 if __name__ == "__main__":
