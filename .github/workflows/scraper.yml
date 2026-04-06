@@ -22,6 +22,12 @@ jobs:
         run: |
           pip install -r requirements.txt
 
+      - name: Restore Telegram session
+        env:
+          SESSION_B64: ${{ secrets.SESSION_B64 }}
+        run: |
+          echo "$SESSION_B64" | base64 -d > session.session
+
       - name: Run scraper
         env:
           API_ID: ${{ secrets.API_ID }}
