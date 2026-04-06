@@ -9,7 +9,6 @@ SESSION_STR = os.getenv("TG_SESSION")
 
 CHANNELS_FILE = "tg_channels.txt"
 OUTPUT_FILE = "configs.txt"
-UPDATE_INTERVAL = 1800  # 30 минут
 
 
 def load_channels():
@@ -22,12 +21,22 @@ def load_channels():
     return channels
 
 
+async def safe_iter_messages(client, channel, limit):
+    try:
+        async with asyncio.timeout(15):  # максимум 15 секунд на канал
+            async for msg in client.iter_messages(channel, limit=limit):
+                yield msg
+    except asyncio.TimeoutError:
+        print(f"⚠ Таймаут при чтении канала: {channel}")
+
+
 async def scrape_once(client):
     channels = load_channels()
     all_cfg = []
 
     for ch in channels:
-        async for msg in client.iter_messages(ch, limit=500):
+        print(f"Читаю канал: {ch}")
+        async for msg in safe_iter_messages(client, ch, limit=600):
             if msg.message:
                 for line in msg.message.split("\n"):
                     line = line.strip()
@@ -56,9 +65,7 @@ async def main():
         print("❌ Сессия недействительна")
         return
 
-    while True:
-        await scrape_once(client)
-        await asyncio.sleep(UPDATE_INTERVAL)
+    await scrape_once(client)  # ← один запуск и выход
 
 
 if __name__ == "__main__":
