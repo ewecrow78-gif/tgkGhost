@@ -1,9 +1,15 @@
-import os
 import asyncio
-import requests
+import os
 from telethon import TelegramClient
-from config import API_ID, API_HASH, CHANNELS, OUTPUT_FILE, UPDATE_INTERVAL, normalize_channel
+from telethon.sessions import StringSession
+
 from parser import extract_all, normalize_config
+from config import CHANNELS, OUTPUT_FILE, UPDATE_INTERVAL, normalize_channel
+
+
+API_ID = int(os.getenv("TG_API_ID"))
+API_HASH = os.getenv("TG_API_HASH")
+SESSION_STR = os.getenv("TG_SESSION")
 
 
 async def scrape_once(client):
@@ -17,23 +23,8 @@ async def scrape_once(client):
             if not msg.message:
                 continue
 
-            # Ищем только RAW-ссылки
-            raw_links = [
-                x for x in extract_all(msg.message)
-                if x.startswith("https://raw")
-            ]
-
-            for raw in raw_links:
-                print(f"  → Нашёл RAW: {raw}")
-                try:
-                    r = requests.get(raw, timeout=10)
-                    r.raise_for_status()
-
-                    raw_configs = extract_all(r.text)
-                    all_configs.extend(raw_configs)
-
-                except Exception as e:
-                    print(f"Ошибка загрузки RAW: {e}")
+            configs = extract_all(msg.message)
+            all_configs.extend(configs)
 
     # нормализация + удаление дублей
     normalized = {normalize_config(cfg): cfg for cfg in all_configs}
@@ -49,8 +40,16 @@ async def scrape_once(client):
 
 
 async def run():
-    client = TelegramClient("session", API_ID, API_HASH)
-    await client.start()
+    if not SESSION_STR:
+        print("❌ TG_SESSION отсутствует в Secrets")
+        return
+
+    client = TelegramClient(StringSession(SESSION_STR), API_ID, API_HASH)
+    await client.connect()
+
+    if not await client.is_user_authorized():
+        print("❌ TG_SESSION недействителен — обнови секрет")
+        return
 
     while True:
         print("[⏳] Запуск обновления...")
