@@ -59,7 +59,7 @@ async def scrape_once(client):
     for ch in channels:
         print(f"📡 Читаю канал: {ch}")
 
-        async for msg in client.iter_messages(ch, limit=2000):
+        async for msg in client.iter_messages(ch, limit=3000):
             if not msg.message:
                 continue
 
