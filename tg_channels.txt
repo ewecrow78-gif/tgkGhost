@@ -5,3 +5,5 @@ vpn_obhod_glushilok
 ClosingVPN
 cvedc_vpn
 bypassrtp
+niyakwi
+strbypass
